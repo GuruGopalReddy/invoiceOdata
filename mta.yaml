@@ -1,0 +1,128 @@
+_schema-version: "3.1"
+ID: wipro_invoice
+description: A simple CAP project.
+version: 1.0.0
+modules:
+  - name: wipro_invoice-srv
+    type: nodejs
+    path: gen/srv
+    requires:
+      - name: wipro_invoice-db
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    parameters:
+      buildpack: nodejs_buildpack
+      readiness-health-check-http-endpoint: /health
+      readiness-health-check-type: http
+    build-parameters:
+      builder: npm
+  - name: wipro_invoice-db-deployer
+    type: hdb
+    path: gen/db
+    requires:
+      - name: wipro_invoice-db
+    parameters:
+      buildpack: nodejs_buildpack
+  - name: wipro_invoice-destination-content
+    type: com.sap.application.content
+    requires:
+      - name: wipro_invoice-destination-service
+        parameters:
+          content-target: true
+      - name: wipro_invoice_html_repo_host
+        parameters:
+          service-key:
+            name: wipro_invoice_html_repo_host-key
+      - name: uaa_wipro_invoice
+        parameters:
+          service-key:
+            name: uaa_wipro_invoice-key
+    parameters:
+      content:
+        instance:
+          destinations:
+            - Name: wipro_inv_app_wipro_invoice_html_repo_host
+              ServiceInstanceName: wipro_invoice-html5-app-host-service
+              ServiceKeyName: wipro_invoice_html_repo_host-key
+              sap.cloud.service: wipro_inv_app
+            - Authentication: OAuth2UserTokenExchange
+              Name: wipro_inv_app_uaa_wipro_invoice
+              ServiceInstanceName: wipro_invoice-xsuaa-service
+              ServiceKeyName: uaa_wipro_invoice-key
+              sap.cloud.service: wipro_inv_app
+          existing_destinations_policy: ignore
+    build-parameters:
+      no-source: true
+  - name: wipro_invoice-app-content
+    type: com.sap.application.content
+    path: .
+    requires:
+      - name: wipro_invoice_html_repo_host
+        parameters:
+          content-target: true
+    build-parameters:
+      build-result: resources
+      requires:
+        - artifacts:
+            - wiproinvoiceapp.zip
+          name: wiproinvoiceapp
+          target-path: resources/
+  - name: wiproinvoiceapp
+    type: html5
+    path: app/wipro_invoice_app
+    build-parameters:
+      build-result: dist
+      builder: custom
+      commands:
+        - npm install
+        - npm run build:cf
+      supported-platforms:
+        []
+resources:
+  - name: wipro_invoice-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+  - name: wipro_invoice-destination-service
+    type: org.cloudfoundry.managed-service
+    parameters:
+      config:
+        HTML5Runtime_enabled: true
+        init_data:
+          instance:
+            destinations:
+              - Authentication: NoAuthentication
+                Name: ui5
+                ProxyType: Internet
+                Type: HTTP
+                URL: https://ui5.sap.com
+            existing_destinations_policy: update
+        version: 1.0.0
+      service: destination
+      service-name: wipro_invoice-destination-service
+      service-plan: lite
+  - name: wipro_invoice_html_repo_host
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: html5-apps-repo
+      service-name: wipro_invoice-html5-app-host-service
+      service-plan: app-host
+  - name: uaa_wipro_invoice
+    type: org.cloudfoundry.managed-service
+    parameters:
+      path: ./xs-security.json
+      service: xsuaa
+      service-name: wipro_invoice-xsuaa-service
+      service-plan: application
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm ci
+        - npx cds build --production
